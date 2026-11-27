@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: ml-e2e
+    orgId: 1
+    folder: ml-e2e
+    type: file
+    disableDeletion: false
+    options:
+      path: /var/lib/grafana/dashboards

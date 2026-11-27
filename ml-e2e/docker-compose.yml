@@ -1,0 +1,105 @@
+name: ml-e2e
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.3
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////data/mlflow.db
+      --default-artifact-root /data/artifacts
+    volumes:
+      - mlflow_data:/data
+    ports:
+      - "5000:5000"
+
+  chroma:
+    image: chromadb/chroma:0.5.23
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    ports:
+      - "8000:8000"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-web:
+    image: langfuse/langfuse:2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
+      NEXTAUTH_SECRET: ml-e2e-dev-secret-change-in-prod
+      SALT: ml-e2e-salt-change-in-prod
+      NEXTAUTH_URL: http://localhost:3001
+      TELEMETRY_ENABLED: "false"
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
+      SALT: ml-e2e-salt-change-in-prod
+      TELEMETRY_ENABLED: "false"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3002:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      MODEL_ARTIFACT_DIR: /app/artifacts
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      - ./artifacts:/app/artifacts
+    depends_on:
+      - mlflow
+
+  ollama:
+    profiles: [ollama]
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  mlflow_data:
+  pg_data:
+  ollama_data:
